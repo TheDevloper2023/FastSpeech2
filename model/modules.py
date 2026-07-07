@@ -13,6 +13,67 @@ from utils.tools import get_mask_from_lengths, pad
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+class SpeakerEncoder(nn.Module): 
+    """
+    Speaker Encoder
+    
+
+    ID -> Lookup -> MLP -> LayerNorm -> Speaker Embedding
+    """
+    def __init__(self, preprocess_config, model_config):
+        super(SpeakerEncoder, self).__init__()
+        with open(os.path.join(preprocess_config["path"]["preprocessed_path"], "speakers.json"),"r",) as f:
+            n_speaker = len(json.load(f))
+
+        self.speaker_emb = nn.Embedding(
+                n_speaker,
+                model_config["transformer"]["encoder_hidden"],
+            )
+        
+        # Build MLP
+        layers = []
+        current_dim = model_config["transformer"]["encoder_hidden"]
+        for hidden_dim in model_config["speaker_encoder"]["hidden_dims"]:
+            layers.append(nn.Linear(current_dim, hidden_dim))
+            layers.append(nn.BatchNorm1d(hidden_dim))
+            layers.append(nn.Dropout(model_config["speaker_encoder"]["dropout"]))
+            layers.append(nn.LeakyReLU(0.2))
+            current_dim = hidden_dim
+        
+
+        self.nets = nn.Sequential(*layers)
+        self.nets.apply(self.init_weights)
+        ####
+        self.normalize = nn.LayerNorm(current_dim)
+    
+
+    @staticmethod
+    def init_weights(m):
+        if isinstance(m, nn.Linear):
+            nn.init.xavier_uniform_(m.weight)
+            nn.init.zeros_(m.bias)
+
+    def forward(self, speaker_ids):
+        speaker_embeddings = self.speaker_emb(speaker_ids)
+        speaker_embeddings = self.nets(speaker_embeddings)
+        speaker_embeddings = self.normalize(speaker_embeddings)
+        return speaker_embeddings
+
+
+class SSSUnit(nn.Module):
+    """
+    Shift Scale Shift Unit
+    """
+
+    def __init__(self, input_dim, output_dim):
+        super(SSSUnit, self).__init__()
+        self.lin = nn.Linear(input_dim, output_dim * 3)
+        nn.init.zeros_(self.lin.weight)
+        nn.init.zeros_(self.lin.bias)
+
+    def forward(self, x, y):
+        pre_shift, log_scale, post_shift = self.lin(y).chunk(3, dim=-1)
+        return (x + pre_shift) * torch.exp(log_scale) + post_shift
 
 class VarianceAdaptor(nn.Module):
     """Variance Adaptor"""
