@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from transformer import Encoder, Decoder, PostNet
 from .modules import VarianceAdaptor
 from utils.tools import get_mask_from_lengths
+from .aligner import Aligner
 
 
 class FastSpeech2(nn.Module):
@@ -39,6 +40,11 @@ class FastSpeech2(nn.Module):
                 n_speaker,
                 model_config["transformer"]["encoder_hidden"],
             )
+        
+        self.aligner = Aligner(
+            preprocess_config["preprocessing"]["mel"]["n_mel_channels"],
+            model_config["transformer"]["encoder_hidden"],
+        )
 
     def forward(
         self,
@@ -64,11 +70,9 @@ class FastSpeech2(nn.Module):
         )
 
         output = self.encoder(texts, src_masks)
-
-        if self.speaker_emb is not None:
-            output = output + self.speaker_emb(speakers).unsqueeze(1).expand(
-                -1, max_src_len, -1
-            )
+        encoded_text = output
+        
+        o_alignment_dur, alignment_soft, alignment_logprob, alignment_mas = self.aligner(encoded_text, mels, src_masks, mel_masks)
 
         (
             output,
@@ -85,7 +89,7 @@ class FastSpeech2(nn.Module):
             max_mel_len,
             p_targets,
             e_targets,
-            d_targets,
+            o_alignment_dur,
             p_control,
             e_control,
             d_control,
@@ -107,4 +111,9 @@ class FastSpeech2(nn.Module):
             mel_masks,
             src_lens,
             mel_lens,
+            alignment_logprob,
+            alignment_mas,
+            alignment_soft,
+            o_alignment_dur,
+            encoded_text,
         )

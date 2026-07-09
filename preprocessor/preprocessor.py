@@ -2,7 +2,6 @@ import os
 import random
 import json
 
-import tgt
 import librosa
 import numpy as np
 import pyworld as pw
@@ -71,16 +70,17 @@ class Preprocessor:
                     continue
 
                 basename = wav_name.split(".")[0]
-                tg_path = os.path.join(
-                    self.out_dir, "TextGrid", speaker, "{}.TextGrid".format(basename)
+                lab_path = os.path.join(
+                    self.in_dir, speaker, "{}.lab".format(basename)
                 )
-                if os.path.exists(tg_path):
-                    ret = self.process_utterance(speaker, basename)
-                    if ret is None:
-                        continue
-                    else:
-                        info, pitch, energy, n = ret
-                    out.append(info)
+                if not os.path.exists(lab_path):
+                    continue
+
+                ret = self.process_utterance(speaker, basename)
+                if ret is None:
+                    continue
+                info, pitch, energy, n = ret
+                out.append(info)
 
                 if len(pitch) > 0:
                     pitch_scaler.partial_fit(pitch.reshape((-1, 1)))
@@ -153,32 +153,19 @@ class Preprocessor:
         return out
 
     def process_utterance(self, speaker, basename):
-        wav_path = os.path.join(self.in_dir, speaker, "{}.wav".format(basename))
-        text_path = os.path.join(self.in_dir, speaker, "{}.lab".format(basename))
-        tg_path = os.path.join(
-            self.out_dir, "TextGrid", speaker, "{}.TextGrid".format(basename)
-        )
+        wav_path = os.path.join(self.in_dir, speaker, f"{basename}.wav")
+        text_path = os.path.join(self.in_dir, speaker, f"{basename}.lab")
 
-        # Get alignments
-        textgrid = tgt.io.read_textgrid(tg_path)
-        phone, duration, start, end = self.get_alignment(
-            textgrid.get_tier_by_name("phones")
-        )
-        text = "{" + " ".join(phone) + "}"
-        if start >= end:
+        if not os.path.exists(text_path):
             return None
 
-        # Read and trim wav files
-        wav, _ = librosa.load(wav_path)
-        wav = wav[
-            int(self.sampling_rate * start) : int(self.sampling_rate * end)
-        ].astype(np.float32)
-
-        # Read raw text
-        with open(text_path, "r") as f:
+        with open(text_path, "r", encoding="utf-8") as f:
             raw_text = f.readline().strip("\n")
 
-        # Compute fundamental frequency
+        wav, _ = librosa.load(wav_path, sr=self.sampling_rate)
+        wav = wav.astype(np.float32)
+
+        # Pitch extraction
         pitch, t = pw.dio(
             wav.astype(np.float64),
             self.sampling_rate,
@@ -186,109 +173,34 @@ class Preprocessor:
         )
         pitch = pw.stonemask(wav.astype(np.float64), pitch, t, self.sampling_rate)
 
-        pitch = pitch[: sum(duration)]
+        # Mel and energy
+        mel_spectrogram, energy = Audio.tools.get_mel_from_wav(wav, self.STFT)
+        mel_len = mel_spectrogram.shape[1]
+
+        # Trim pitch and energy to mel length
+        pitch = pitch[:mel_len]
+        energy = energy[:mel_len]
+
         if np.sum(pitch != 0) <= 1:
             return None
 
-        # Compute mel-scale spectrogram and energy
-        mel_spectrogram, energy = Audio.tools.get_mel_from_wav(wav, self.STFT)
-        mel_spectrogram = mel_spectrogram[:, : sum(duration)]
-        energy = energy[: sum(duration)]
-
-        if self.pitch_phoneme_averaging:
-            # perform linear interpolation
-            nonzero_ids = np.where(pitch != 0)[0]
-            interp_fn = interp1d(
-                nonzero_ids,
-                pitch[nonzero_ids],
-                fill_value=(pitch[nonzero_ids[0]], pitch[nonzero_ids[-1]]),
-                bounds_error=False,
-            )
-            pitch = interp_fn(np.arange(0, len(pitch)))
-
-            # Phoneme-level average
-            pos = 0
-            for i, d in enumerate(duration):
-                if d > 0:
-                    pitch[i] = np.mean(pitch[pos : pos + d])
-                else:
-                    pitch[i] = 0
-                pos += d
-            pitch = pitch[: len(duration)]
-
-        if self.energy_phoneme_averaging:
-            # Phoneme-level average
-            pos = 0
-            for i, d in enumerate(duration):
-                if d > 0:
-                    energy[i] = np.mean(energy[pos : pos + d])
-                else:
-                    energy[i] = 0
-                pos += d
-            energy = energy[: len(duration)]
-
         # Save files
-        dur_filename = "{}-duration-{}.npy".format(speaker, basename)
-        np.save(os.path.join(self.out_dir, "duration", dur_filename), duration)
-
-        pitch_filename = "{}-pitch-{}.npy".format(speaker, basename)
+        pitch_filename = f"{speaker}-pitch-{basename}.npy"
         np.save(os.path.join(self.out_dir, "pitch", pitch_filename), pitch)
 
-        energy_filename = "{}-energy-{}.npy".format(speaker, basename)
+        energy_filename = f"{speaker}-energy-{basename}.npy"
         np.save(os.path.join(self.out_dir, "energy", energy_filename), energy)
 
-        mel_filename = "{}-mel-{}.npy".format(speaker, basename)
-        np.save(
-            os.path.join(self.out_dir, "mel", mel_filename),
-            mel_spectrogram.T,
-        )
+        mel_filename = f"{speaker}-mel-{basename}.npy"
+        np.save(os.path.join(self.out_dir, "mel", mel_filename), mel_spectrogram.T)
 
         return (
-            "|".join([basename, speaker, text, raw_text]),
+            f"{basename}|{speaker}|{raw_text}|{raw_text}",
             self.remove_outlier(pitch),
             self.remove_outlier(energy),
-            mel_spectrogram.shape[1],
+            mel_len,
         )
 
-    def get_alignment(self, tier):
-        sil_phones = ["sil", "sp", "spn"]
-
-        phones = []
-        durations = []
-        start_time = 0
-        end_time = 0
-        end_idx = 0
-        for t in tier._objects:
-            s, e, p = t.start_time, t.end_time, t.text
-
-            # Trim leading silences
-            if phones == []:
-                if p in sil_phones:
-                    continue
-                else:
-                    start_time = s
-
-            if p not in sil_phones:
-                # For ordinary phones
-                phones.append(p)
-                end_time = e
-                end_idx = len(phones)
-            else:
-                # For silent phones
-                phones.append(p)
-
-            durations.append(
-                int(
-                    np.round(e * self.sampling_rate / self.hop_length)
-                    - np.round(s * self.sampling_rate / self.hop_length)
-                )
-            )
-
-        # Trim tailing silences
-        phones = phones[:end_idx]
-        durations = durations[:end_idx]
-
-        return phones, durations, start_time, end_time
 
     def remove_outlier(self, values):
         values = np.array(values)
