@@ -35,3 +35,7 @@ max_seq_len: 1000
 vocoder:
   model: "HiFi-GAN" # support 'HiFi-GAN', 'MelGAN'
   speaker: "LJSpeech" # support  'LJSpeech', 'universal'
+
+aligner: # I lowkey forgot I needed to add this
+  bin_loss_start_epoch: 30 # baseline 30
+  bin_loss_warmup_epochs: 5 # baseline 5
