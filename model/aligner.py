@@ -108,7 +108,7 @@ class ReLUGT(nn.Module):
         return torch.where(x < 0, self.alpha_neg * self.slope * x, self.alpha_pos * x ** 2)
 
 
-
+# My own shitty code
 class Aligner(nn.Module):
     """
     Wrapper for MAS and the aligner network.

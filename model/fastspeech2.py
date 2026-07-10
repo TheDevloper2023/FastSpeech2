@@ -117,3 +117,63 @@ class FastSpeech2(nn.Module):
             o_alignment_dur,
             encoded_text,
         )
+    
+    def infer(
+        self,
+        speakers,
+        texts,
+        src_lens,
+        max_src_len,
+        p_control=1.0,
+        e_control=1.0,
+        d_control=1.0,      
+    ):
+        src_masks = get_mask_from_lengths(src_lens, max_src_len)
+        mel_masks = None
+
+        output = self.encoder(texts, src_masks)
+        encoded_text = output
+        
+        o_alignment_dur, alignment_soft, alignment_logprob, alignment_mas = torch.zeros(1), torch.zeros(1), torch.zeros(1), torch.zeros(1)
+        (
+            output,
+            p_predictions,
+            e_predictions,
+            log_d_predictions,
+            d_rounded,
+            mel_lens,
+            mel_masks,
+        ) = self.variance_adaptor(
+            output,
+            src_masks,
+            mel_masks,
+            None,
+            None,
+            None,
+            None,
+            p_control,
+            e_control,
+            d_control,
+        )
+
+        output, mel_masks = self.decoder(output, mel_masks)
+        output = self.mel_linear(output)
+
+        postnet_output = self.postnet(output) + output
+
+        return (
+            output,
+            postnet_output,
+            p_predictions,
+            e_predictions,
+            log_d_predictions,
+            d_rounded,
+            src_masks,
+            mel_masks,
+            src_lens,
+            mel_lens,
+            alignment_logprob,
+            alignment_mas,
+            alignment_soft,
+            o_alignment_dur,
+        )

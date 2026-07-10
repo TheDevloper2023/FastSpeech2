@@ -175,7 +175,7 @@ class FastSpeech2Loss(nn.Module):
 
         if epoch > self.bin_loss_start_epoch:
             bin_loss_scale = min((epoch - self.bin_loss_start_epoch) / self.bin_loss_warmup_epochs, 1.0)
-            al_match_loss = self.bin_loss(hard_attention=attn_hard, soft_attention=attn_soft) * bin_loss_scale
+            al_match_loss = self.bin_loss(attn_hard, attn_soft) * bin_loss_scale
             total_attn_loss += al_match_loss
 
 
