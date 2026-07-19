@@ -2,6 +2,19 @@ import torch
 import torch.nn as nn
 
 
+class CharbonnierLoss(nn.Module):
+    """Charbonnier Loss (L1)"""
+    def __init__(self, eps=1e-6):
+        super(CharbonnierLoss, self).__init__()
+        self.eps = eps
+
+    def forward(self, x, y):
+        b, c, h = y.size()
+        loss = torch.sum(torch.sqrt((x - y).pow(2) + self.eps**2))
+        return loss/(c*b*h)
+
+
+
 class FastSpeech2Loss(nn.Module):
     """ FastSpeech2 Loss """
 
@@ -13,8 +26,8 @@ class FastSpeech2Loss(nn.Module):
         self.energy_feature_level = preprocess_config["preprocessing"]["energy"][
             "feature"
         ]
-        self.mse_loss = nn.MSELoss()
-        self.mae_loss = nn.L1Loss()
+        self.mse_loss = nn.HuberLoss(delta=0.5)
+        self.mae_loss = CharbonnierLoss()
 
     def forward(self, inputs, predictions):
         (

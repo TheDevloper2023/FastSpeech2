@@ -54,7 +54,7 @@ def window_sumsquare(
     # Compute the squared window at the desired length
     win_sq = get_window(window, win_length, fftbins=True)
     win_sq = librosa_util.normalize(win_sq, norm=norm) ** 2
-    win_sq = librosa_util.pad_center(win_sq, n_fft)
+    win_sq = librosa_util.pad_center(win_sq, size=n_fft)
 
     # Fill the envelope
     for i in range(n_frames):
@@ -73,7 +73,7 @@ def griffin_lim(magnitudes, stft_fn, n_iters=30):
 
     angles = np.angle(np.exp(2j * np.pi * np.random.rand(*magnitudes.size())))
     angles = angles.astype(np.float32)
-    angles = torch.autograd.Variable(torch.from_numpy(angles))
+    angles = torch.from_numpy(angles).to(magnitudes.device)
     signal = stft_fn.inverse(magnitudes, angles).squeeze(1)
 
     for i in range(n_iters):

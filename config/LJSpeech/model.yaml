@@ -28,6 +28,10 @@ variance_embedding:
 #   n_style_token: 10
 #   attn_head: 4
 
+speaker_encoder:
+  hidden_dims: [128]
+  dropout: 0.1
+
 multi_speaker: False
 
 max_seq_len: 1000

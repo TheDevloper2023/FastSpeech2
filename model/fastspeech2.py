@@ -6,7 +6,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from transformer import Encoder, Decoder, PostNet
-from .modules import VarianceAdaptor
+
+from .modules import VarianceAdaptor, SpeakerEncoder, SSSUnit
 from utils.tools import get_mask_from_lengths
 
 
@@ -26,17 +27,12 @@ class FastSpeech2(nn.Module):
         )
         self.postnet = PostNet()
 
-        self.speaker_emb = None
+        self.speaker_encoder = None
+        self.speaker_injector = None
         if model_config["multi_speaker"]:
-            with open(
-                os.path.join(
-                    preprocess_config["path"]["preprocessed_path"], "speakers.json"
-                ),
-                "r",
-            ) as f:
-                n_speaker = len(json.load(f))
-            self.speaker_emb = nn.Embedding(
-                n_speaker,
+            self.speaker_encoder = SpeakerEncoder(preprocess_config, model_config)
+            self.speaker_injector = SSSUnit(
+                model_config["transformer"]["encoder_hidden"],
                 model_config["transformer"]["encoder_hidden"],
             )
 
@@ -65,10 +61,9 @@ class FastSpeech2(nn.Module):
 
         output = self.encoder(texts, src_masks)
 
-        if self.speaker_emb is not None:
-            output = output + self.speaker_emb(speakers).unsqueeze(1).expand(
-                -1, max_src_len, -1
-            )
+        if self.speaker_encoder is not None:
+            speaker_embeddings = self.speaker_encoder(speakers)
+            output = self.speaker_injector(output, speaker_embeddings)
 
         (
             output,
